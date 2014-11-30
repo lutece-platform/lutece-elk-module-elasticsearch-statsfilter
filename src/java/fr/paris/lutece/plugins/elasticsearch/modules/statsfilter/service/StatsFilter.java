@@ -33,7 +33,20 @@
  */
 package fr.paris.lutece.plugins.elasticsearch.modules.statsfilter.service;
 
+import fr.paris.lutece.portal.service.util.AppLogService;
+
+import org.elasticsearch.action.index.IndexResponse;
+
+import org.elasticsearch.client.Client;
+
+import org.elasticsearch.common.xcontent.XContentBuilder;
+import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
+
+import org.elasticsearch.node.Node;
+import static org.elasticsearch.node.NodeBuilder.nodeBuilder;
+
 import java.io.IOException;
+
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -41,57 +54,68 @@ import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
-import org.elasticsearch.action.index.IndexResponse;
-import org.elasticsearch.client.Client;
-import org.elasticsearch.common.xcontent.XContentBuilder;
-import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
-import org.elasticsearch.node.Node;
-import static org.elasticsearch.node.NodeBuilder.nodeBuilder;
 
 /**
  *
  */
 public class StatsFilter implements Filter
 {
-    private static final String CLUSTER_NAME = "lutece_cluster";
-    private static final String INDEX_NAME = "statsfilter";
-    private static final String DOCUMENT_NAME = "request";
-
+    private static Boolean _bInit = Boolean.FALSE;
     private Node _node;
     private Client _client;
 
     @Override
-    public void init(FilterConfig fc) throws ServletException
+    public void init( FilterConfig fc ) throws ServletException
     {
-        _node = nodeBuilder().clusterName( CLUSTER_NAME ).node();
-        _client = _node.client();
+        _node = nodeBuilder(  ).clusterName( Constants.CLUSTER_NAME ).node(  );
+        _client = _node.client(  );
+    }
 
+    private void initIndex(  )
+    {
+        //        synchronized (_bInit)
+        {
+            if ( !_bInit )
+            {
+                if ( ElasticsearchUtils.isIndexExist( _client, Constants.INDEX_NAME ) )
+                {
+                    AppLogService.info( "Elasticsearch index '" + Constants.INDEX_NAME +
+                        "' exists, should delete and recreate it !" );
+                    ElasticsearchUtils.deleteIndex( _client, Constants.INDEX_NAME );
+                    ElasticsearchUtils.createIndex( _client, Constants.INDEX_NAME, Constants.DOCUMENT_TYPE );
+                }
+                else
+                {
+                    AppLogService.info( "Elasticsearch index '" + Constants.INDEX_NAME + "' doesn't exist, should create it !" );
+                    ElasticsearchUtils.createIndex( _client, Constants.INDEX_NAME, Constants.DOCUMENT_TYPE );
+                }
+
+                _bInit = Boolean.TRUE;
+            }
+        }
     }
 
     @Override
-    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException
+    public void doFilter( ServletRequest request, ServletResponse response, FilterChain chain )
+        throws IOException, ServletException
     {
         HttpServletRequest r = (HttpServletRequest) request;
-        System.out.println(r.getRequestURI() + r.getQueryString());
-        XContentBuilder json = jsonBuilder().startObject()
-                .field("method", r.getMethod())
-                .field("uri", r.getRequestURI())
-                .field("query_string", r.getQueryString())
-                .endObject();
+        System.out.println( r.getRequestURI(  ) + r.getQueryString(  ) );
 
-        IndexResponse ir = _client.prepareIndex( INDEX_NAME , DOCUMENT_NAME )
-                .setSource(json.string())
-                .execute()
-                .actionGet();
-        
-        
-        chain.doFilter(request, response);
+        initIndex();
+        XContentBuilder jsonSource = jsonBuilder(  ).startObject(  ).field( "method", r.getMethod(  ) )
+                                   .field( "uri", r.getRequestURI(  ) ).field( "query_string", r.getQueryString(  ) )
+                                   .endObject(  );
+
+        IndexResponse ir = _client.prepareIndex( Constants.INDEX_NAME, Constants.DOCUMENT_TYPE ).setSource( jsonSource.string(  ) ).execute(  )
+                                  .actionGet(  );
+
+        chain.doFilter( request, response );
     }
 
     @Override
-    public void destroy()
+    public void destroy(  )
     {
-        _node.close();
+        _node.close(  );
     }
-
 }
